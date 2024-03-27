@@ -1,12 +1,16 @@
-# Project : ROI detection
+# Project : Chest Segmentation
 >
-> in this trial we converted the problem of roi detection into segmentation which get better results
+> in this project I will apply most MLOps principle on simple segmentation task 
+  - using mlflow for tracking the experiment
+  - tracking many segmentation metrics 
+  - making a simple ~complete workflow for visualization , training , valudation , testing , deployment
+  - using DVC for managing datasets
 
 ## Description
 
-- This project is designed to train a model for jaw roi detection, where:  
-  - input ---> is a MIP projections of a dicom (Sagittal and coronal)
-  - output ---> is a mask on the jaws roi
+- This project is designed to train a model for Chest Segmentation, where:  
+  - input ---> is a  projections image of X_Ray chest
+  - output ---> is a mask on lung only
 - The used model is UNET
 - We used accuracy, precision, iou as metrics.
 - loss function : cross entropy
@@ -62,10 +66,23 @@ The results, including trained models and logs, will be saved in the specified `
 
 --------------------------------------------------------
 
-### Model performance
+## MLFlow stuff
 
-- Generally , accuracy > 98%
-- IOU = ....
+### Tracking metrics
+
+![screenshot](metrics.png)
+
+### System metrics during training
+
+![screenshot](system.png)
+
+### Visualization during training
+
+![screenshot](visualization.png)
+
+### experiments comparison
+
+![screenshot](comparison.png)
 
 --------------------------------------------------------
 

@@ -35,7 +35,7 @@ events.*
 # logs output
 *.txt
 *.csv
-*.png
+
 
 #models
 *.pt
