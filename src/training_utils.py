@@ -184,7 +184,7 @@ def visualize_model_output(input_images: torch.Tensor,
 
         fig, axs = plt.subplots(1, 4, figsize=(12, 4))
         edge_points = get_mask_outlines(target.cpu().numpy())
-        print(edge_points)
+        #print(edge_points)
         axs[0].imshow(img.squeeze().cpu().numpy(), cmap="gray")
         axs[0].set_title(f"case {case_name[random_item]}")
         axs[0].axis("off")

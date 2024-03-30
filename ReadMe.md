@@ -70,19 +70,19 @@ The results, including trained models and logs, will be saved in the specified `
 
 ### Tracking metrics
 
-![screenshot](metrics.png)
+![screenshot](extras/metrics.png)
 
 ### System metrics during training
 
-![screenshot](system.png)
+![screenshot](extras/system.png)
 
 ### Visualization during training
 
-![screenshot](visualization.png)
+![screenshot](extras/visualization.png)
 
 ### experiments comparison
 
-![screenshot](comparison.png)
+![screenshot](extras/comparison.png)
 
 --------------------------------------------------------
 

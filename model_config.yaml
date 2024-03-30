@@ -1,8 +1,7 @@
-mode: overfit # train , test ,export ,overfit
+mode: train # train , test ,export ,overfit
 distributed_lr: False #torchrun --standalone --nnodes=1 --nproc-per-node=2  "C:\Users\Ossama Ammar\Atomica-code\cvml\dicom-teeth-segmentation\main.py"
 random_seed: 42
 trial_name: roi_segmentation_overift
-mlflow_trial_name: roi_segmentation_overift
 
 #model and data:
 model: U_Net #available models : U_Net ,SMP
@@ -17,15 +16,14 @@ test_validate_ratio: 0.5
 dataset_version: False #v1.0 #False #roi-dataset-1.0
 
 #hyperparameters:
-epochs: 50
+epochs: 5
 log_period: 1
-learning_rate: 0.0001
+learning_rate: 0.02
 criterion: CrossEntropyLoss
 optimizer: Adam
 augment: False
 
 #training
-plot_loss: True
 auto_cast: False #using grad scaler to apply mixed precession
 clip_grad: False #to prevent exploding gradients
 use_lr_scheduler: True # (Step , Cosine , linear ,inverse sqrt) to update the learning rate during training

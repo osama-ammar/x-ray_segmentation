@@ -1,13 +1,14 @@
-from typing import AnyStr
-import os
 
+import os
 import onnxruntime as onnxrt
 from onnx import load as load_onnx
 from onnx.checker import check_model
-
+from typing import  AnyStr
 import torch
 import numpy.typing as npt
-
+from torch.nn import Module
+import torch
+from torch.types import _size as torch_size
 
 def save_ckp(checkpoint_path: AnyStr, model: torch.nn.Module, optimizer: torch.optim.Optimizer, epoch: int) -> None:
     state = {
@@ -16,6 +17,22 @@ def save_ckp(checkpoint_path: AnyStr, model: torch.nn.Module, optimizer: torch.o
         'epoc': epoch,
     }
     torch.save(state, checkpoint_path)
+
+def loss_fn_test(model: Module, input_size: torch_size, label_size: torch_size, loss_fn: Module, device: AnyStr = "cuda"):
+    " used to test loss function dynamics in UNET (input , output , errors) before training "
+    test_tensor = torch.rand(input_size)
+    test_tensor = test_tensor.to(device, dtype=torch.float32)
+
+    label_tensor = torch.randint(0, 4, label_size)
+    label_tensor = label_tensor.to(device, dtype=torch.uint8)
+
+    output = model(test_tensor)
+    print("sizes output")
+    print(output.size(), input_size, label_size)
+    loss = loss_fn(output, label_tensor.float())
+
+    print("loss function testing .....")
+    print("loss , its size :", loss, loss.size())
 
 
 def load_ckp(checkpoint_path: AnyStr, model: torch.nn.Module, optimizer: torch.optim.Optimizer) -> int:
