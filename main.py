@@ -88,7 +88,7 @@ def main():
     #########
     # MlFlow
     #########
-    mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI"))
+    #mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI"))
     mlflow.start_run()
     mlflow_logger = MLFlowLogger(
         experiment_name=trial_name,
@@ -140,9 +140,14 @@ def main():
     ###########
     data = MIPDataModule(dataset_path, batch_size=batch_size,
                             input_size=input_size, train_validate_ratio=train_validate_ratio,test_validate_ratio=test_validate_ratio,num_workers=1)
-    trainer = pl.Trainer(max_epochs=epochs, enable_progress_bar=True
-                            , devices=1, accelerator="gpu",fast_dev_run= mode=="overfit" ,logger=mlflow_logger,
-                            log_every_n_steps=log_period)  # precision=16)
+    trainer = pl.Trainer(max_epochs=epochs,
+                        enable_progress_bar=True,
+                        devices=1,
+                        accelerator="gpu",
+                        limit_train_batches = 6 if mode=='overfit' else None,
+                        limit_val_batches = 3 if mode=='overfit' else None,
+                        logger=mlflow_logger,
+                        log_every_n_steps=log_period)  # precision=16)
     
     trainer.fit(model, data)
 

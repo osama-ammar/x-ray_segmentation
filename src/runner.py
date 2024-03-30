@@ -31,9 +31,8 @@ class Segmentation(pl.LightningModule):
         data = batch["img"].unsqueeze(1).float()
         if len(data.shape) ==5:
             data = torch.matmul(data[..., :3], torch.tensor([0.2989, 0.5870, 0.1140], device=data.device))
-            print(data.shape)
-            
-            print("modified------------------")
+            #print(data.shape)
+            #print("modified------------------")
         mask = batch["mask"].long()
         case_id=batch["case_id"]
         print(data.shape)
@@ -151,7 +150,7 @@ if __name__ == "__main__":
         # model output channels (number of classes in your dataset)
         classes=2,
     )
-    my_model = UNet(1, 2)
+    my_model = Segmentation(1, 2)
 
     dummy_input = torch.rand(4, 1, 512, 512)
     output = my_model(dummy_input)
