@@ -11,6 +11,7 @@ import os
 import warnings
 from typing import Dict
 from pytorch_lightning.loggers import MLFlowLogger
+from pytorch_lightning.callbacks import EarlyStopping
 import torch
 # Ignore the user warning about the missing audio backend
 warnings.filterwarnings("ignore", category=UserWarning,
@@ -62,7 +63,6 @@ def main():
     dropout = config.get("dropout")
     
     log_folder_path = make_log_folder(results_path, trial_name)
-    mp_rank = 0
     ####################################
     # moving to selected dataset version
     ####################################
@@ -138,8 +138,11 @@ def main():
     ###########
     # Train
     ###########
+    print("preparing dataset")
     data = MIPDataModule(dataset_path, batch_size=batch_size,
-                            input_size=input_size, train_validate_ratio=train_validate_ratio,test_validate_ratio=test_validate_ratio,num_workers=1)
+                            input_size=input_size, train_validate_ratio=train_validate_ratio,test_validate_ratio=test_validate_ratio,num_workers=4)
+    
+    print("preparing trainer")
     trainer = pl.Trainer(max_epochs=epochs,
                         enable_progress_bar=True,
                         devices=1,
@@ -147,8 +150,10 @@ def main():
                         limit_train_batches = 6 if mode=='overfit' else None,
                         limit_val_batches = 3 if mode=='overfit' else None,
                         logger=mlflow_logger,
+                        callbacks=[EarlyStopping(monitor="validation_loss", mode="min",min_delta=0.001,patience=5)],
                         log_every_n_steps=log_period)  # precision=16)
     
+    print("preparing fitting")
     trainer.fit(model, data)
 
     ###########

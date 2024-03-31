@@ -105,6 +105,8 @@ class Segmentation(pl.LightningModule):
         visualize_model_output(batch["img"], batch["mask"],
                                result["outputs"],self.log_path,
                                batch_idx, False, batch["case_id"])
+        # to be used in early stopping
+        self.log("validation_loss", self.validation_loss)
         return result
 
     def test_step(self, batch, batch_idx):

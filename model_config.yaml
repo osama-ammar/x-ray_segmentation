@@ -1,5 +1,5 @@
 mode: overfit # train , test ,export ,overfit
-distributed_lr: False #torchrun --standalone --nnodes=1 --nproc-per-node=2  "C:\Users\Ossama Ammar\Atomica-code\cvml\dicom-teeth-segmentation\main.py"
+distributed_lr: False 
 random_seed: 42
 trial_name: roi_segmentation_overift
 
