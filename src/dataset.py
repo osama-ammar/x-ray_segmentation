@@ -13,13 +13,14 @@ import imageio
 
 class MIPDataModule(pl.LightningDataModule):
     def __init__(self, data_dir: str, input_size: int, batch_size: int = 32, num_workers: int = 4,
-                 train_validate_ratio: float = 0.8, test_validate_ratio: float = 0.5):
+                 train_validate_ratio: float = 0.8, test_validate_ratio: float = 0.5,mode='train'):
         super().__init__()
         self.data_dir = data_dir
         self.input_size = input_size
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.val_split = train_validate_ratio
+        self.mode= mode
 
         self.data = []  # List to store prepared data
 
@@ -28,12 +29,16 @@ class MIPDataModule(pl.LightningDataModule):
         paths = list_files(self.data_dir)  # Get list of file paths in data directory
         cases_ids = [path.split(os.path.sep)[-1][0:-4] for path in paths]  # Extract case IDs from file paths
 
+        if self.mode=='overfit' :
+                print("overfitting modeeeeeeeeeeeeeeeeeeeeee")
+                paths = paths[0:8]
+                cases_ids = cases_ids[0:8]
+
         # Iterate over image and mask paths
-        for path, case_id in zip(paths, cases_ids):
+        for image_path, case_id in zip(paths, cases_ids):
             try:
                 # Load image and mask
-                image_path = path
-                mask_path = os.path.join(path[0:-24],'masks', f'{case_id}_mask.png')
+                mask_path = os.path.join(image_path[0:-24],'masks', f'{case_id}_mask.png')
                 image = normalize(imageio.imread(image_path))
                 image = resize(image, self.input_size, cv2.INTER_LINEAR)
     
@@ -69,7 +74,7 @@ class MIPDataModule(pl.LightningDataModule):
         return DataLoader(self.data, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers, persistent_workers=True)
 
     def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers,persistent_workers=True)
 
     # def test_dataloader(self):
     #     # DataLoader for test set

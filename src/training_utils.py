@@ -1,4 +1,4 @@
-import matplotlib.patches as patches
+
 import numpy as np
 import numpy.typing as npt
 import cv2

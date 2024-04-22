@@ -5,10 +5,11 @@ import pytorch_lightning as pl
 from .training_utils import bbox_from_mask, visualize_model_output, save_online_logs
 from .metrics import UnetMetrics, DetectionMetrics
 from .networks import SMP
+from .model_operations import save_ckp 
 
 class Segmentation(pl.LightningModule):
     #defining model and some requirements
-    def __init__(self, in_channels, out_channels, log_path,mlflow_logger,use_lr_scheduler=False):
+    def __init__(self, in_channels, out_channels, log_path,weights_path,mlflow_logger,use_lr_scheduler=False):
         super(Segmentation, self).__init__()
         self.model = SMP(in_channels, out_channels)
         self.criterion = nn.CrossEntropyLoss()
@@ -18,6 +19,7 @@ class Segmentation(pl.LightningModule):
         self.validation_loss = 0.0
         self.test_loss = 0.0
         self.log_path = log_path
+        self.weights_path=weights_path
         self.mlflow_logger = mlflow_logger
         self.use_lr_scheduler = use_lr_scheduler
 
@@ -35,9 +37,9 @@ class Segmentation(pl.LightningModule):
             #print("modified------------------")
         mask = batch["mask"].long()
         case_id=batch["case_id"]
-        print(data.shape)
-        print(mask.shape)
-        print(case_id,'\n',"==========")
+        # print(data.shape)
+        # print(mask.shape)
+        # print(case_id,'\n',"==========")
         
         
 
@@ -57,7 +59,7 @@ class Segmentation(pl.LightningModule):
         detection_iou = self.detection_metrics.compute()
         
         self.mlflow_logger.experiment.log_artifact(self.mlflow_logger.run_id, self.log_path)
-        
+
         return {
             "loss": loss,
             "accuracy": accuracy,
@@ -107,6 +109,8 @@ class Segmentation(pl.LightningModule):
                                batch_idx, False, batch["case_id"])
         # to be used in early stopping
         self.log("validation_loss", self.validation_loss)
+        optimizer=self.optimizers()
+        save_ckp(self.weights_path,self.model,optimizer,self.current_epoch)
         return result
 
     def test_step(self, batch, batch_idx):

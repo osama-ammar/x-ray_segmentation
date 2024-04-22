@@ -12,7 +12,10 @@ import warnings
 from typing import Dict
 from pytorch_lightning.loggers import MLFlowLogger
 from pytorch_lightning.callbacks import EarlyStopping
+from pytorch_lightning.strategies import DDPStrategy
 import torch
+from pytorch_lightning.callbacks import ModelPruning
+
 # Ignore the user warning about the missing audio backend
 warnings.filterwarnings("ignore", category=UserWarning,
                         message="No audio backend is available.", module="torchaudio")
@@ -44,6 +47,8 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     auto_cast = config.get("auto_cast")
     clip_grad = config.get("clip_grad")
+    early_stopping= config.get("early_stopping")
+    pruning=config.get("pruning")
 
     # Data stuff
     dataset_version = config.get("dataset_version")
@@ -112,7 +117,7 @@ def main():
     # Model
     ###########
     models = {
-        "U_Net": Segmentation(in_channels, out_channels,log_folder_path,mlflow_logger)
+        "U_Net": Segmentation(in_channels, out_channels,log_folder_path,weights_path,mlflow_logger)
     }
     # model initializing
     # rank of the running process in multiple-processing setting or 0 for single-processing
@@ -121,7 +126,7 @@ def main():
     ###########
     # Export
     ###########
-    if mode == 'export' and mp_rank == 0:
+    if mode == 'export' :
         dummy_input = torch.rand(
             (batch_size, in_channels, input_size, input_size))
         checkpoint = torch.load(weights_path, map_location=torch.device('cpu'))
@@ -130,7 +135,7 @@ def main():
         model.to("cpu")
         onnx_export(model, dummy_input, log_folder_path)
 
-    if mp_rank == 0:
+
         # saving hyperparameters file so that it can be used later to reproduce the trial
         shutil.copyfile(path, os.path.join(
             log_folder_path, "model_config.yaml"))
@@ -138,21 +143,36 @@ def main():
     ###########
     # Train
     ###########
-    print("preparing dataset")
-    data = MIPDataModule(dataset_path, batch_size=batch_size,
-                            input_size=input_size, train_validate_ratio=train_validate_ratio,test_validate_ratio=test_validate_ratio,num_workers=4)
-    
-    print("preparing trainer")
-    trainer = pl.Trainer(max_epochs=epochs,
-                        enable_progress_bar=True,
-                        devices=1,
-                        accelerator="gpu",
-                        limit_train_batches = 6 if mode=='overfit' else None,
-                        limit_val_batches = 3 if mode=='overfit' else None,
-                        logger=mlflow_logger,
-                        callbacks=[EarlyStopping(monitor="validation_loss", mode="min",min_delta=0.001,patience=5)],
-                        log_every_n_steps=log_period)  # precision=16)
-    
+    callbacks_n=[]
+    if pruning:
+        pruning = ModelPruning("l1_unstructured", amount=0.5)
+        callbacks_n.append(pruning)
+    if early_stopping:
+        early_stopping = EarlyStopping(monitor="", mode="min", min_delta=0.001, patience=5)
+        callbacks_n.append(early_stopping)
+        
+        
+    if mode == "train" or "overfit":
+        
+        
+        ddp = DDPStrategy(process_group_backend="gloo")
+
+        data = MIPDataModule(dataset_path, batch_size=batch_size,
+                             input_size=input_size, train_validate_ratio=train_validate_ratio,
+                             test_validate_ratio=test_validate_ratio,mode=mode)
+
+        trainer = pl.Trainer(max_epochs=epochs,
+                             enable_progress_bar=True,
+                             accelerator="gpu",
+                             logger=mlflow_logger,
+                             log_every_n_steps=log_period,
+                             limit_train_batches=6 if mode == 'overfit' else None,
+                             limit_val_batches=6 if mode == 'overfit' else None,
+                             callbacks=callbacks_n if len(callbacks_n)>0 else None,
+                             devices=[0, 1] if distributed_lr else "auto",
+                             strategy=ddp if distributed_lr else "auto",
+                             default_root_dir=log_folder_path)
+        trainer.fit(model, data)
     print("preparing fitting")
     trainer.fit(model, data)
 

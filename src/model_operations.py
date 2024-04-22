@@ -1,4 +1,3 @@
-
 import os
 import onnxruntime as onnxrt
 from onnx import load as load_onnx
@@ -9,10 +8,13 @@ import numpy.typing as npt
 from torch.nn import Module
 import torch
 from torch.types import _size as torch_size
+from neural_compressor.quantization import fit as fit
+from neural_compressor.config import PostTrainingQuantConfig
+
 
 def save_ckp(checkpoint_path: AnyStr, model: torch.nn.Module, optimizer: torch.optim.Optimizer, epoch: int) -> None:
     state = {
-        'model_state_dict': model.to('cpu').state_dict(),
+        'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
         'epoc': epoch,
     }
@@ -75,3 +77,25 @@ def use_onnx(onnx_model_path: AnyStr, input_image: npt.NDArray) -> npt.NDArray:
     input_names = ["input"]
     output_names = ["output"]
     return session.run(output_names, {input_names: input_image})
+
+# post quaization using Intel neural compressor
+from neural_compressor.config import PostTrainingQuantConfig, TuningCriterion, AccuracyCriterion
+
+accuracy_criterion = AccuracyCriterion(tolerable_loss=0.01)
+tuning_criterion = TuningCriterion(max_trials=600)
+conf = PostTrainingQuantConfig(approach="static", backend="default", tuning_criterion=tuning_criterion, accuracy_criterion=accuracy_criterion)
+
+def eval_func_for_post_quant(model,model_n, trainer_n,data_module):
+    setattr(model, "model", model_n)
+    result = trainer_n.validate(model=model, dataloaders=data_module.val_dataloader())
+    return result[0]["accuracy"]
+
+
+def post_quantize(model,model_n,trainer,data_module):
+    conf = PostTrainingQuantConfig()
+    q_model = fit(model=model.model, conf=conf, calib_dataloader=data_module.val_dataloader(), eval_func=eval_func_for_post_quant(model,model_n,trainer,data_module))
+    q_model.save("./results/")
+    
+    
+    
+    
