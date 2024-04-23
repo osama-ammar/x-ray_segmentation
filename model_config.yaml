@@ -1,4 +1,4 @@
-mode: overfit # train , test ,export ,overfit
+mode: export # train , test ,export ,overfit
 distributed_lr: False 
 random_seed: 42
 trial_name: roi_segmentation_overift
@@ -16,7 +16,7 @@ test_validate_ratio: 0.5
 dataset_version: False #v1.0 #False #roi-dataset-1.0
 
 #hyperparameters:
-epochs: 30
+epochs: 20
 log_period: 2
 learning_rate: 0.02
 criterion: CrossEntropyLoss
@@ -29,10 +29,10 @@ clip_grad: False #to prevent exploding gradients
 use_lr_scheduler: True # (Step , Cosine , linear ,inverse sqrt) to update the learning rate during training
 lr_scheduler_gamma: 0.1
 early_stopping: False
-pruning: True
+pruning: False
 
 #paths :
 dataset_path: D:\cases_dicom\chest_x-ray\dataset
 test_dataset_path: D:\cases_dicom\chest_x-ray\test_set
-weights_path: D:\Code_store\x-ray_segmentation\results\unet_np.pth
+weights_path: D:\Code_store\x-ray_segmentation\results\unet_pt.pth
 results_path: D:\Code_store\x-ray_segmentation\results

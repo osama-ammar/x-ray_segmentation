@@ -1,6 +1,6 @@
 from src.runner import Segmentation
 from src.dataset import MIPDataModule
-from src.model_operations import onnx_export
+from src.model_operations import onnx_export , use_onnx#,onnx_to_quantized
 from src.training_utils import make_log_folder
 import subprocess
 import mlflow
@@ -15,6 +15,8 @@ from pytorch_lightning.callbacks import EarlyStopping
 from pytorch_lightning.strategies import DDPStrategy
 import torch
 from pytorch_lightning.callbacks import ModelPruning
+
+
 
 # Ignore the user warning about the missing audio backend
 warnings.filterwarnings("ignore", category=UserWarning,
@@ -130,11 +132,21 @@ def main():
         dummy_input = torch.rand(
             (batch_size, in_channels, input_size, input_size))
         checkpoint = torch.load(weights_path, map_location=torch.device('cpu'))
+        model=model.model
         model.load_state_dict(checkpoint['model_state_dict'])
         model.eval()
         model.to("cpu")
-        onnx_export(model, dummy_input, log_folder_path)
-
+        onnx_path=os.path.join(results_path + "\\model.onnx")
+        onnx_export(model, dummy_input, onnx_path)
+        
+        #quantizing onnx model
+        quantized_onnx_path=os.path.join(results_path + "\\model_quantized.onnx")
+        # sub_dataset = MIPDataModule(dataset_path, batch_size=batch_size,
+        #             input_size=input_size, train_validate_ratio=train_validate_ratio,
+        #             test_validate_ratio=test_validate_ratio,mode="overfit")
+        # onnx_to_quantized( onnx_path, quantized_onnx_path,sub_dataset)
+        from onnxruntime.quantization import quantize_dynamic
+        quantized_model = quantize_dynamic(onnx_path, quantized_onnx_path,)
 
         # saving hyperparameters file so that it can be used later to reproduce the trial
         shutil.copyfile(path, os.path.join(
@@ -145,6 +157,7 @@ def main():
     ###########
     callbacks_n=[]
     if pruning:
+        print("include pruning")
         pruning = ModelPruning("l1_unstructured", amount=0.5)
         callbacks_n.append(pruning)
     if early_stopping:
@@ -152,29 +165,29 @@ def main():
         callbacks_n.append(early_stopping)
         
         
-    if mode == "train" or "overfit":
+    if mode == "train" or mode =="overfit":
         
         
         ddp = DDPStrategy(process_group_backend="gloo")
 
         data = MIPDataModule(dataset_path, batch_size=batch_size,
-                             input_size=input_size, train_validate_ratio=train_validate_ratio,
-                             test_validate_ratio=test_validate_ratio,mode=mode)
+                            input_size=input_size, train_validate_ratio=train_validate_ratio,
+                            test_validate_ratio=test_validate_ratio,mode=mode)
 
         trainer = pl.Trainer(max_epochs=epochs,
-                             enable_progress_bar=True,
-                             accelerator="gpu",
-                             logger=mlflow_logger,
-                             log_every_n_steps=log_period,
-                             limit_train_batches=6 if mode == 'overfit' else None,
-                             limit_val_batches=6 if mode == 'overfit' else None,
-                             callbacks=callbacks_n if len(callbacks_n)>0 else None,
-                             devices=[0, 1] if distributed_lr else "auto",
-                             strategy=ddp if distributed_lr else "auto",
-                             default_root_dir=log_folder_path)
+                            enable_progress_bar=True,
+                            accelerator="gpu",
+                            logger=mlflow_logger,
+                            log_every_n_steps=log_period,
+                            limit_train_batches=6 if mode == 'overfit' else None,
+                            limit_val_batches=6 if mode == 'overfit' else None,
+                            callbacks=callbacks_n if len(callbacks_n)>0 else None,
+                            devices=[0, 1] if distributed_lr else "auto",
+                            strategy=ddp if distributed_lr else "auto",
+                            default_root_dir=log_folder_path)
         trainer.fit(model, data)
-    print("preparing fitting")
-    trainer.fit(model, data)
+        print("preparing fitting")
+        trainer.fit(model, data)
 
     ###########
     # Test
@@ -185,5 +198,7 @@ def main():
         trainer.test(model, data)
 
 
+    if mode=="test_onnx":
+        use_onnx('results/model.onnx', input_data)
 if __name__ == "__main__":
     main()
