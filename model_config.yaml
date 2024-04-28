@@ -1,4 +1,4 @@
-mode: export # train , test ,export ,overfit
+mode: test_onnx # train , test ,export ,overfit ,test_onnx
 distributed_lr: False 
 random_seed: 42
 trial_name: roi_segmentation_overift

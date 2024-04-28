@@ -1,7 +1,7 @@
 from src.runner import Segmentation
 from src.dataset import MIPDataModule
 from src.model_operations import onnx_export , use_onnx#,onnx_to_quantized
-from src.training_utils import make_log_folder
+from src.training_utils import make_log_folder ,visualize_model_output ,visualize_onnx_output
 import subprocess
 import mlflow
 import pytorch_lightning as pl
@@ -185,7 +185,6 @@ def main():
                             devices=[0, 1] if distributed_lr else "auto",
                             strategy=ddp if distributed_lr else "auto",
                             default_root_dir=log_folder_path)
-        trainer.fit(model, data)
         print("preparing fitting")
         trainer.fit(model, data)
 
@@ -199,6 +198,16 @@ def main():
 
 
     if mode=="test_onnx":
-        use_onnx('results/model.onnx', input_data)
+        sub_dataset = MIPDataModule(dataset_path, batch_size=1,
+                    input_size=input_size, train_validate_ratio=train_validate_ratio,
+                    test_validate_ratio=test_validate_ratio,mode="overfit")
+        sub_dataset.prepare_data()
+        sample_input=torch.from_numpy(sub_dataset.data[0]['img']).unsqueeze(0).unsqueeze(0).float()
+        print(sample_input.shape)
+        output=use_onnx('results/model_quantized.onnx', sample_input)
+        visualize_onnx_output(output[0])
+        print(output[0].shape)
+        
+        
 if __name__ == "__main__":
     main()

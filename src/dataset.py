@@ -29,7 +29,7 @@ class MIPDataModule(pl.LightningDataModule):
         paths = list_files(self.data_dir)  # Get list of file paths in data directory
         cases_ids = [path.split(os.path.sep)[-1][0:-4] for path in paths]  # Extract case IDs from file paths
 
-        if self.mode=='overfit' :
+        if self.mode=='overfit' or self.mode=='test_onnx':
                 print("overfitting modeeeeeeeeeeeeeeeeeeeeee")
                 paths = paths[0:8]
                 cases_ids = cases_ids[0:8]

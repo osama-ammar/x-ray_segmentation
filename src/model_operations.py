@@ -67,16 +67,22 @@ def onnx_export(model: torch.nn.Module, dummy_input: torch.Tensor, onnx_path: An
     check_model(model_onnx)  # check onnx model
     print("Model exported to ONNX format.")
 
+# This function will allow us to use the same PyTorch DataLoader with ONNX
+def to_numpy(tensor):
+    return tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
 
 def use_onnx(onnx_model_path: AnyStr, input_data: npt.NDArray) -> npt.NDArray:
     """ using onnx in inference mode"""
     # Run the ONNX model with the dummy input tensor
     session = onnxrt.InferenceSession(onnx_model_path)
-    input_names = ["input"]
-    output_names = ["output"]
+    # input_names = ["input"]
+    # output_names = ["output"]
     input_name = session.get_inputs()[0].name
     output_name = session.get_outputs()[0].name
-    output = session.run([output_name], {input_name: input_data})
+    input_data=to_numpy(input_data)
+    print(input_data.shape)
+    input_data=[input_data]
+    output = session.run(None, {input_name: input_data[0]})
     #output=session.run(output_names, {input_names: input_image})
     return output
 
@@ -99,9 +105,7 @@ def post_quantize(model,model_n,trainer,data_module):
     q_model.save("./results/")
     
     
-# This function will allow us to use the same PyTorch DataLoader with ONNX
-def to_numpy(tensor):
-    return tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
+
 
 
 import numpy as np 
