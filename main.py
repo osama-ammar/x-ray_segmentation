@@ -1,7 +1,8 @@
 from src.runner import Segmentation
 from src.dataset import MIPDataModule
-from src.model_operations import onnx_export , use_onnx#,onnx_to_quantized
+from src.model_operations import onnx_export , use_onnx , post_quantize#,onnx_to_quantized
 from src.training_utils import make_log_folder ,visualize_model_output ,visualize_onnx_output
+from src.metrics import detailed_testing
 import subprocess
 import mlflow
 import pytorch_lightning as pl
@@ -139,18 +140,22 @@ def main():
         onnx_path=os.path.join(results_path + "\\model.onnx")
         onnx_export(model, dummy_input, onnx_path)
         
-        #quantizing onnx model
+        #quantizing onnx model USING onnxruntime.quantization
+        # 1st run[python -m onnxruntime.quantization.preprocess --input results/model.onnx --output results/model_preprocessed.onnx   --skip_symbolic_shape SKIP_SYMBOLIC_SHAPE] to preprocess
+        preprocessed_onnx_path=os.path.join(results_path + "\\model_preprocessed.onnx")
         quantized_onnx_path=os.path.join(results_path + "\\model_quantized.onnx")
-        # sub_dataset = MIPDataModule(dataset_path, batch_size=batch_size,
-        #             input_size=input_size, train_validate_ratio=train_validate_ratio,
-        #             test_validate_ratio=test_validate_ratio,mode="overfit")
-        # onnx_to_quantized( onnx_path, quantized_onnx_path,sub_dataset)
+        
         from onnxruntime.quantization import quantize_dynamic
-        quantized_model = quantize_dynamic(onnx_path, quantized_onnx_path,)
+        from onnxruntime.quantization import QuantType
+        quantized_model = quantize_dynamic(
+            preprocessed_onnx_path,
+            quantized_onnx_path,
+            #optimize_model=True,
+            per_channel=False,
+            reduce_range=False,
+            weight_type=QuantType.QUInt8,)
 
-        # saving hyperparameters file so that it can be used later to reproduce the trial
-        shutil.copyfile(path, os.path.join(
-            log_folder_path, "model_config.yaml"))
+
 
     ###########
     # Train
@@ -185,29 +190,50 @@ def main():
                             devices=[0, 1] if distributed_lr else "auto",
                             strategy=ddp if distributed_lr else "auto",
                             default_root_dir=log_folder_path)
+
         print("preparing fitting")
         trainer.fit(model, data)
 
     ###########
     # Test
     ###########
+
     if mode == 'test':
         checkpoint = torch.load(weights_path, map_location=torch.device('cpu'))
         model.load_state_dict(checkpoint['model_state_dict'])
         trainer.test(model, data)
 
-
     if mode=="test_onnx":
+        import torch.nn as nn
         sub_dataset = MIPDataModule(dataset_path, batch_size=1,
-                    input_size=input_size, train_validate_ratio=train_validate_ratio,
-                    test_validate_ratio=test_validate_ratio,mode="overfit")
+        input_size=input_size, train_validate_ratio=train_validate_ratio,
+        test_validate_ratio=test_validate_ratio,mode="overfit")
+        
         sub_dataset.prepare_data()
-        sample_input=torch.from_numpy(sub_dataset.data[0]['img']).unsqueeze(0).unsqueeze(0).float()
-        print(sample_input.shape)
-        output=use_onnx('results/model_quantized.onnx', sample_input)
-        visualize_onnx_output(output[0])
-        print(output[0].shape)
+        sub_dataset.setup("validate")
+        validate_dataloader=sub_dataset.val_dataloader()
+
+        model=model.model
         
+        checkpoint = torch.load(weights_path, map_location=torch.device('cpu'))
+        model.load_state_dict(checkpoint['model_state_dict'])
+        #trainer.test(model, data)
+        criterion = nn.CrossEntropyLoss()
+        detailed_testing(model,validate_dataloader,criterion,log_folder_path,onnx_compare=True,onnx_path="results/model_quantized.onnx",used_device="cpu")
+
+    if mode=="post_quantize":
+        sub_dataset = MIPDataModule(dataset_path, batch_size=1,
+        input_size=input_size, train_validate_ratio=train_validate_ratio,
+        test_validate_ratio=test_validate_ratio,mode="overfit")
         
+        sub_dataset.prepare_data()
+        sub_dataset.setup("validate")
+        validate_dataloader=sub_dataset.val_dataloader()
+        post_quantize(model,validate_dataloader)
+        
+    # saving hyperparameters file so that it can be used later to reproduce the trial
+    shutil.copyfile(path, os.path.join(
+        log_folder_path, "model_config.yaml"))
+    
 if __name__ == "__main__":
     main()

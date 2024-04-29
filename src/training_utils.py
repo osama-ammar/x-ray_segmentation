@@ -2,19 +2,20 @@
 import numpy as np
 import numpy.typing as npt
 import cv2
-import torch
 import csv
 from matplotlib import pyplot as plt
 import seaborn as sn
-from typing import Optional, Sequence, Tuple, Union, AnyStr, Dict, List
+from typing import Optional, Sequence, Tuple, Union, AnyStr, Dict, List ,Callable
 import os
 import datetime
 import torch.nn.functional as F
+import torch
+
 import os
 import albumentations as A
 import random
-from numpy.testing import assert_allclose as numpy_assert_allclose
-from torch.testing import assert_close as torch_assert_close
+
+
 
 #######################
 # Augmentations
@@ -214,7 +215,7 @@ def visualize_model_output(input_images: torch.Tensor,
         plt.close()
 
 
-def visualize_model_output( logits: torch.Tensor):
+def visualize_segmentation_output( logits: torch.Tensor):
     """used to visualize model output only"""
     if len(logits.shape) == 4:
         # Apply softmax and get argmax
@@ -248,102 +249,3 @@ def visualize_onnx_output( logits):
     axs.axis("off")
     plt.show()
     
-def compare_pt_onnx_outputs(pt_model,pt_model_path, onnx_model_path, input_data):
-
-    with torch.no_grad():
-        
-        # load pt model
-        checkpoint = torch.load(pt_model_path, map_location='cpu')
-        pt_model.load_state_dict(checkpoint['state_dict'])
-        # Map models to CPU
-        pt_model.eval()
-        pt_model.to('cpu')
-        # delete checkpoint
-        del checkpoint
-        # Forward pass with PyTorch model
-        pt_output = pt_model(input_data)
-
-        # Forward pass with ONNX model
-        import onnxruntime
-        ort_session = onnxruntime.InferenceSession(
-            onnx_model_path, providers=['CPUExecutionProvider'])
-        ort_inputs = {
-            ort_session.get_inputs(
-            )[0].name: input_data.cpu().numpy()
-        }
-        ort_output = ort_session.run(None, ort_inputs)[0]
-
-        ###############################################
-        # check that torch and onnx results are equal #
-        ###############################################
-        torch_assert_close(
-            pt_output,
-            torch.from_numpy(ort_output),
-            rtol=1e-03,
-            atol=1e-05
-        )
-        numpy_assert_allclose(
-            pt_output.cpu().numpy(),
-            ort_output,
-            rtol=1e-03,
-            atol=1e-05
-        )
-
-        print(
-            "The outputs of PyTorch and ONNX models are equal. Congratulations along way to go!")
-
-        
-def save_plots(train_loss: List, validation_loss: List, conf_matrix: npt.NDArray, log_folder_path: AnyStr) -> Tuple[AnyStr, AnyStr]:
-    """Save losses and metrics plots to disk"""
-
-    # plot and save the train and validation loss
-    plt.figure()
-    plt.plot(train_loss, label="Training Loss")
-    plt.plot(validation_loss, label="Validation Loss")
-    plt.legend()
-    loss_fig_path = os.path.join(log_folder_path, "loss.png")
-    plt.savefig(loss_fig_path)
-    plt.show()
-
-    # plot and save the conf matrix
-    plt.figure()
-    ax = sn.heatmap(conf_matrix, annot=True, cmap="Blues",
-                    linewidth=.5, fmt=".2f", linecolor="black")
-    ax.xaxis.tick_top()
-    conf_mat_path = os.path.join(log_folder_path, "conf_matrix.png")
-    plt.savefig(conf_mat_path)
-    return loss_fig_path, conf_mat_path
-
-
-
-
-def load_model_weights(model,model_path):
-
-    # load pretrained weights to it
-    weights_path = model_path
-    checkpoint = torch.load(weights_path, map_location="cpu")
-    model.load_state_dict(checkpoint["state_dict"])
-
-    # set the model to evaluation mode
-    model.train(False)
-    model.eval()
-    return model
-
-
-def model_inferences(input):
-    # load model architecture and its weights
-    model = load_model_weights()
-
-    # prepare input (2,400,400)-->(1,2,400,400) and get the output
-    input = input.unsqueeze(dim=0)
-    logits = model(input)  # -->(B,17,400,400)
-    output = F.softmax(logits, dim=1)  # -->(B,17,400,400)
-    # print (torch.unique(output))
-    output = torch.argmax(output, dim=1).squeeze().to(torch.float32)  # -->(B,400,400) pixels values(1-->17)
-    # print (torch.unique(output))
-
-    # show the output
-    _, axs = plt.subplots(1, 1, figsize=(10, 10))
-    axs.imshow(output.cpu().numpy(), cmap="gray")
-    plt.tight_layout()
-    plt.show()

@@ -10,6 +10,9 @@ import torch
 from torch.types import _size as torch_size
 from neural_compressor.quantization import fit as fit
 from neural_compressor.config import PostTrainingQuantConfig
+import matplotlib.pyplot as plt
+from numpy.testing import assert_allclose as numpy_assert_allclose
+from torch.testing import assert_close as torch_assert_close
 
 def save_ckp(checkpoint_path: AnyStr, model: torch.nn.Module, optimizer: torch.optim.Optimizer, epoch: int) -> None:
     state = {
@@ -61,6 +64,8 @@ def onnx_export(model: torch.nn.Module, dummy_input: torch.Tensor, onnx_path: An
         keep_initializers_as_inputs=False,
         do_constant_folding=True,
         opset_version=17,
+        verbose=False,    
+        
     )
     # Checks
     model_onnx = load_onnx(onnx_path)  # load onnx model
@@ -71,6 +76,88 @@ def onnx_export(model: torch.nn.Module, dummy_input: torch.Tensor, onnx_path: An
 def to_numpy(tensor):
     return tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
 
+
+def compare_pt_onnx_outputs(pt_model,pt_model_path, onnx_model_path, input_data):
+
+    with torch.no_grad():
+        
+        # load pt model
+        checkpoint = torch.load(pt_model_path, map_location='cpu')
+        pt_model.load_state_dict(checkpoint['state_dict'])
+        # Map models to CPU
+        pt_model.eval()
+        pt_model.to('cpu')
+        # delete checkpoint
+        del checkpoint
+        # Forward pass with PyTorch model
+        pt_output = pt_model(input_data)
+
+        # Forward pass with ONNX model
+        import onnxruntime
+        ort_session = onnxruntime.InferenceSession(
+            onnx_model_path, providers=['CPUExecutionProvider'])
+        ort_inputs = {
+            ort_session.get_inputs(
+            )[0].name: input_data.cpu().numpy()
+        }
+        ort_output = ort_session.run(None, ort_inputs)[0]
+
+        ###############################################
+        # check that torch and onnx results are equal #
+        ###############################################
+        torch_assert_close(
+            pt_output,
+            torch.from_numpy(ort_output),
+            rtol=1e-03,
+            atol=1e-05
+        )
+        numpy_assert_allclose(
+            pt_output.cpu().numpy(),
+            ort_output,
+            rtol=1e-03,
+            atol=1e-05
+        )
+
+        print(
+            "The outputs of PyTorch and ONNX models are equal. Congratulations along way to go!")
+
+        
+
+
+
+
+def load_model_weights(model,model_path):
+
+    # load pretrained weights to it
+    weights_path = model_path
+    checkpoint = torch.load(weights_path, map_location="cpu")
+    model.load_state_dict(checkpoint["state_dict"])
+
+    # set the model to evaluation mode
+    model.train(False)
+    model.eval()
+    return model
+
+
+def model_inferences(input):
+    # load model architecture and its weights
+    model = load_model_weights()
+
+    # prepare input (2,400,400)-->(1,2,400,400) and get the output
+    input = input.unsqueeze(dim=0)
+    logits = model(input)  # -->(B,17,400,400)
+    output = F.softmax(logits, dim=1)  # -->(B,17,400,400)
+    # print (torch.unique(output))
+    output = torch.argmax(output, dim=1).squeeze().to(torch.float32)  # -->(B,400,400) pixels values(1-->17)
+    # print (torch.unique(output))
+
+    # show the output
+    _, axs = plt.subplots(1, 1, figsize=(10, 10))
+    axs.imshow(output.cpu().numpy(), cmap="gray")
+    plt.tight_layout()
+    plt.show()
+    
+    
 def use_onnx(onnx_model_path: AnyStr, input_data: npt.NDArray) -> npt.NDArray:
     """ using onnx in inference mode"""
     # Run the ONNX model with the dummy input tensor
@@ -86,117 +173,28 @@ def use_onnx(onnx_model_path: AnyStr, input_data: npt.NDArray) -> npt.NDArray:
     #output=session.run(output_names, {input_names: input_image})
     return output
 
+
+
 # post quaization using Intel neural compressor
+from neural_compressor.quantization import fit as fit
 from neural_compressor.config import PostTrainingQuantConfig, TuningCriterion, AccuracyCriterion
 
-accuracy_criterion = AccuracyCriterion(tolerable_loss=0.01)
-tuning_criterion = TuningCriterion(max_trials=600)
-conf = PostTrainingQuantConfig(approach="static", backend="default", tuning_criterion=tuning_criterion, accuracy_criterion=accuracy_criterion)
+def eval_func(model,dataloader,metric):
+    for input, label in dataloader:
+        output = model(input)
+        metric.update(output, label)
+    accuracy = metric.result()
+    return accuracy
 
-def eval_func_for_post_quant(model,model_n, trainer_n,data_module):
-    setattr(model, "model", model_n)
-    result = trainer_n.validate(model=model, dataloaders=data_module.val_dataloader())
-    return result[0]["accuracy"]
-
-
-def post_quantize(model,model_n,trainer,data_module):
-    conf = PostTrainingQuantConfig()
-    q_model = fit(model=model.model, conf=conf, calib_dataloader=data_module.val_dataloader(), eval_func=eval_func_for_post_quant(model,model_n,trainer,data_module))
-    q_model.save("./results/")
-    
-    
-
-
-
-import numpy as np 
-from tqdm import tqdm
-import onnxruntime as ort
-# from onnxruntime import quantization
-
-# def onnx_test_cpu_gpu(model_pt,onnx_path,val_ds):
-#     ort_provider = ['CPUExecutionProvider']
-#     if torch.cuda.is_available():
-#         model_pt.to('cuda')
-#         ort_provider = ['CUDAExecutionProvider']
-
-#     ort_sess = ort.InferenceSession(onnx_path, providers=ort_provider)
-#     correct_pt = 0
-#     correct_onnx = 0
-#     tot_abs_error = 0
-
-#     for img_batch, label_batch in tqdm(dl, ascii=True, unit="batches"):
-
-#         ort_inputs = {ort_sess.get_inputs()[0].name: to_numpy(img_batch)}
-#         ort_outs = ort_sess.run(None, ort_inputs)[0]
-
-#         ort_preds = np.argmax(ort_outs, axis=1)
-#         correct_onnx += np.sum(np.equal(ort_preds, to_numpy(label_batch)))
-
-#         if torch.cuda.is_available():
-#             img_batch = img_batch.to('cuda')
-#             label_batch = label_batch.to('cuda')
-
-#         with torch.no_grad():
-#             pt_outs = model_pt(img_batch)
-
-#         pt_preds = torch.argmax(pt_outs, dim=1)
-#         correct_pt += torch.sum(pt_preds == label_batch)
-
-#         tot_abs_error += np.sum(np.abs(to_numpy(pt_outs) - ort_outs))
-
-#     print("\n")
-
-#     print(f"pt top-1 acc = {100.0 * correct_pt/len(val_ds)} with {correct_pt} correct samples")
-#     print(f"onnx top-1 acc = {100.0 * correct_onnx/len(val_ds)} with {correct_onnx} correct samples")
-
-#     mae = tot_abs_error/(1000*len(val_ds))
-#     print(f"mean abs error = {mae} with total abs error {tot_abs_error}")
-    
-    
+def post_quantize(model,val_dataloader):
+    accuracy_criterion = AccuracyCriterion(tolerable_loss=0.1)
+    tuning_criterion = TuningCriterion(max_trials=1200)
+    conf = PostTrainingQuantConfig(
+        approach="static", backend="default", tuning_criterion=tuning_criterion, accuracy_criterion=accuracy_criterion
+    )
+    q_model = fit(model=model.model, conf=conf, calib_dataloader=val_dataloader)
+    print(q_model)
+    q_model.save("./saved_model/")
 
 
-# """
-# Since our model is mainly a CNN, we should perform static quantization. But, it requires a dataset to calibrate the quantized model parameters.
-# """
-# class QuntizationDataReader(quantization.CalibrationDataReader):
-#     def __init__(self, torch_ds, batch_size, input_name):
 
-#         self.torch_dl = torch.utils.data.DataLoader(torch_ds, batch_size=batch_size, shuffle=False)
-
-#         self.input_name = input_name
-#         self.datasize = len(self.torch_dl)
-
-#         self.enum_data = iter(self.torch_dl)
-
-#     def to_numpy(self, pt_tensor):
-#         return pt_tensor.detach().cpu().numpy() if pt_tensor.requires_grad else pt_tensor.cpu().numpy()
-
-#     def get_next(self):
-#         batch = next(self.enum_data, None)
-#         if batch is not None:
-#             return {self.input_name: self.to_numpy(batch[0])}
-#         else:
-#             return None
-
-#     def rewind(self):
-#         self.enum_data = iter(self.torch_dl)
-
-# def onnx_to_quantized( onnx_path, quantized_onnx_output_path,calib_ds):
-#     quantization.shape_inference.quant_pre_process(onnx_path, quantized_onnx_output_path, skip_symbolic_shape=False)
-#     ort_provider = ['CPUExecutionProvider'] if torch.cuda.is_available() else ['CUDAExecutionProvider']
-#     ort_sess = ort.InferenceSession(onnx_path, providers=ort_provider)
-#     qdr = QuntizationDataReader(calib_ds, batch_size=4, input_name=ort_sess.get_inputs()[0].name)
-
-#     q_static_opts = {"ActivationSymmetric":False,"WeightSymmetric":True}
-#     if torch.cuda.is_available():
-#         q_static_opts = {"ActivationSymmetric":True,
-#                         "WeightSymmetric":True}
-
-#     model_int8_path = 'resnet18_int8.onnx'
-#     quantized_model = quantization.quantize_static(model_input=quantized_onnx_output_path,
-#                                                 model_output=model_int8_path,
-#                                                 calibration_data_reader=qdr,
-#                                                 extra_options=q_static_opts)
-    
-    
-    

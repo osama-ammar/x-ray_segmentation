@@ -16,7 +16,7 @@ test_validate_ratio: 0.5
 dataset_version: False #v1.0 #False #roi-dataset-1.0
 
 #hyperparameters:
-epochs: 20
+epochs: 10
 log_period: 2
 learning_rate: 0.02
 criterion: CrossEntropyLoss
@@ -34,5 +34,5 @@ pruning: False
 #paths :
 dataset_path: D:\cases_dicom\chest_x-ray\dataset
 test_dataset_path: D:\cases_dicom\chest_x-ray\test_set
-weights_path: D:\Code_store\x-ray_segmentation\results\unet_pt.pth
+weights_path: D:\Code_store\x-ray_segmentation\results\unet.pth
 results_path: D:\Code_store\x-ray_segmentation\results
