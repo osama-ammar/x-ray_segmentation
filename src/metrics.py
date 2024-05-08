@@ -78,8 +78,8 @@ class DetectionMetrics:
         return self.detection_iou.compute()["iou"].item()
 
 
-
-def detailed_testing(
+# run eval metrics on pytorch model or pytorch vs onnx model
+def detailed_evaluation(
     model: Module,
     test_loader: DataLoader,
     criterion: Callable,
@@ -132,7 +132,6 @@ def detailed_testing(
             
             if onnx_compare:
                 # getting onnx metrics
-                print("onnx_compare")
                 onnx_output=use_onnx(onnx_path, data)
                 onnx_output=torch.from_numpy(onnx_output[0])
                 onnx_output_bboxes = bbox_from_mask(onnx_output.to("cpu"), logits="logits")
@@ -142,10 +141,9 @@ def detailed_testing(
                 onnx_log_line = [f"{onnx_test_metrics.compute()[0]}",f"{onnx_test_metrics.compute()[3]}", f"{onnx_detection_metrics.compute()}"]
                 header.extend(onnx_header)
                 log_line.extend(onnx_log_line)
-            
-            print(header)
+    
             save_online_logs(visualization_path, header, log_line)
-
+            
             # mlflow stuff
             if mlflow:
                 mlflow.log_artifacts(visualization_path+"\\training_imgs")
@@ -158,7 +156,7 @@ def detailed_testing(
                 }
                 mlflow.log_metrics(metrics_dict, synchronous=False)
 
-            visualize_model_output(data, mask, output, visualization_path, epoch=iter, training=False,
+            visualize_model_output(data, mask, onnx_output.to("cpu"), visualization_path, epoch=iter, training=False,
                                    case_name=case_name)
             iter += 1
             

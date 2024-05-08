@@ -12,7 +12,7 @@ import imageio
 
 
 class MIPDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir: str, input_size: int, batch_size: int = 32, num_workers: int = 4,
+    def __init__(self, data_dir: str, input_size: int, batch_size: int = 32, num_workers: int = 1,
                  train_validate_ratio: float = 0.8, test_validate_ratio: float = 0.5,mode='train'):
         super().__init__()
         self.data_dir = data_dir

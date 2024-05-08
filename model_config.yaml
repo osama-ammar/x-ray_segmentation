@@ -1,11 +1,11 @@
-mode: test_onnx # train , test ,export ,overfit ,test_onnx
+mode: post_quantize # train , test ,export ,overfit ,test_onnx , post_quantize
 distributed_lr: False 
 random_seed: 42
 trial_name: roi_segmentation_overift
 
 #model and data:
 model: U_Net #available models : U_Net ,SMP
-batch_size: 1
+batch_size: 8
 in_channels: 1
 out_channels: 2
 fmaps: 16 #in case of using U_Net
@@ -16,7 +16,7 @@ test_validate_ratio: 0.5
 dataset_version: False #v1.0 #False #roi-dataset-1.0
 
 #hyperparameters:
-epochs: 10
+epochs: 30
 log_period: 2
 learning_rate: 0.02
 criterion: CrossEntropyLoss
