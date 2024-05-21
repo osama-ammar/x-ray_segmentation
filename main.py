@@ -1,29 +1,31 @@
-from src.runner import Segmentation
-from src.dataset import MIPDataModule
-from src.model_operations import onnx_export , use_onnx , post_quantize , get_calibration_data_reader#,onnx_to_quantized
-from src.training_utils import make_log_folder ,visualize_model_output ,visualize_onnx_output
-from src.metrics import detailed_evaluation
+
+from pydantic import BaseModel
+
+class RecipeArgs:
+    learning_rate: float  # Example type annotation
+
+class MyModel(BaseModel):
+    recipe_args: RecipeArgs
+
+from sparseml.pytorch.optim import ScheduledModifierManager
+
+from networks import U_Net, SMP, onnx_export, load_ckp
+from loader import get_data_loaders, make_log_folder
+from test import test
 import subprocess
 import mlflow
-import pytorch_lightning as pl
+import torch.nn as nn
+import torch.optim as optim
 import yaml
+from train import *
 import shutil
 import os
 import warnings
 from typing import Dict
-from pytorch_lightning.loggers import MLFlowLogger
-from pytorch_lightning.callbacks import EarlyStopping
-from pytorch_lightning.strategies import DDPStrategy
-import torch
-from pytorch_lightning.callbacks import ModelPruning
-from onnxruntime.quantization.quant_utils import QuantFormat
-
 
 # Ignore the user warning about the missing audio backend
-warnings.filterwarnings("ignore", category=UserWarning,
-                        message="No audio backend is available.", module="torchaudio")
-warnings.filterwarnings("ignore", message="torch.utils._pytree._register_pytree_node is deprecated", category=UserWarning)
-mlflow.enable_system_metrics_logging()
+warnings.filterwarnings("ignore")
+warnings.filterwarnings("ignore", message="torch.utils._pytree._register_pytree_node is deprecated.*")
 
 path = os.path.join(os.path.dirname(
     os.path.abspath(__file__)), "model_config.yaml")
@@ -50,8 +52,7 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     auto_cast = config.get("auto_cast")
     clip_grad = config.get("clip_grad")
-    early_stopping= config.get("early_stopping")
-    pruning=config.get("pruning")
+    mlflow_trial_name = config.get("mlflow_trial_name")
 
     # Data stuff
     dataset_version = config.get("dataset_version")
@@ -70,7 +71,7 @@ def main():
     fmaps = config.get("fmaps")
     dropout = config.get("dropout")
     
-    log_folder_path = make_log_folder(results_path, trial_name)
+
     ####################################
     # moving to selected dataset version
     ####################################
@@ -93,136 +94,171 @@ def main():
             print("Error running Git & DVC commands:")
             print(e.stderr)
 
-    #########
-    # MlFlow
-    #########
-    #mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI"))
-    mlflow.start_run()
-    mlflow_logger = MLFlowLogger(
-        experiment_name=trial_name,
-        tracking_uri=os.getenv("MLFLOW_TRACKING_URI"),
-        run_id=mlflow.active_run().info.run_id,
-        artifact_location=log_folder_path
-    )
+    # Set the experiment for MLflow
+    mlflow.set_experiment(mlflow_trial_name)
+    os.environ["MLFLOW_ENABLE_SYSTEM_METRICS_LOGGING"] = "true"
+    # mlflow.doctor()
+    with mlflow.start_run():
+        ###########################
+        # Distributed learning
+        ##########################
 
-    # MlFlow params
-    mlflow_logger.log_hyperparams({
-        "batch_size": batch_size,
-        "learning_rate": learning_rate,
-        "epochs": epochs,
-        "input_size": input_size,
-        "clip_grad": clip_grad,
-        "dataset version": dataset_version,
-        "torch_version": f"torch=={str(torch.__version__)}"
-    })   
-    
-    ###########
-    # Model
-    ###########
-    models = {
-        "U_Net": Segmentation(in_channels, out_channels,log_folder_path,weights_path,mlflow_logger)
-    }
-    # model initializing
-    # rank of the running process in multiple-processing setting or 0 for single-processing
-    model = models[config.get("model")].to(device)
+        models = {
+            "U_Net": U_Net(in_channels, out_channels, fmaps, dropout),
+            "SMP": SMP(in_channels, out_channels)
+        }
+        # model initializing
+        # rank of the running process in multiple-processing setting or 0 for single-processing
+        model = models[config.get("model")].to(device)
+
+        if distributed_lr:
+            """
+            - World size : is the total number of processes participating in the distributed training process.
+                This can be the number of GPUs on a single machine, or the number of machines in a cluster.
+            - Rank :is a unique identifier assigned to each process in the distributed training process. 
+                The rank of a process ranges from 0 to world size - 1
+                Processes in a distributed training process can communicate with each other using their ranks
+
+            """
+            batch_size = batch_size // int(os.environ["WORLD_SIZE"])
+            import torch.distributed as dist
+            from torch.nn.parallel import DistributedDataParallel as DDP
+
+            # Initialize the distributed environment
+            dist.init_process_group("gloo", rank=int(os.environ["LOCAL_RANK"]),
+                                    world_size=int(os.environ['WORLD_SIZE']))
+
+            mp_rank = dist.get_rank()
+            print("rank: ", mp_rank, "world size:", os.environ["WORLD_SIZE"])
+            device = torch.device('cuda:' + str(mp_rank))
+            torch.cuda.set_device(device)
+
+            # model initializing
+            model = model.to(device)
+            model = DDP(model, device_ids=[mp_rank])
+
+        ################################################
+        # training options ( criteria ,optimizers.....)
+        ################################################
+
+        criteria = {
+            "CrossEntropyLoss": nn.CrossEntropyLoss()
+        }
+
+        optimizers = {
+            "Adam": optim.Adam(model.parameters(), lr=learning_rate)
+        }
+        optimizer = optimizers[config.get("optimizer")]
+        criterion = criteria[config.get("criterion")]
+
+        #########
+        # MlFlow
+        #########
+
+        # MlFlow params
+        mlflow.log_param("batch_size", batch_size)
+        mlflow.log_param("learning_rate", learning_rate)
+        mlflow.log_param("epochs", epochs)
+        mlflow.log_param("input_size", input_size)
+        mlflow.log_param("clip_grad", clip_grad)
+        mlflow.log_param("dataset version", dataset_version)
+        mlflow.log_params({"torch_version": "1.12.1+cu116"})
+
+        # MlFlow tags
+        mlflow.set_tag('augment', augment)
+        mlflow.set_tag('clip_grad', clip_grad)
+        mlflow.set_tag('auto_cast', auto_cast)
+
+        lr_scheduler = None
+        if use_lr_scheduler:
+            # adjust the learning rate during training to improve performance..convergence
+            # StepLR:reduces the learning rate by a factor of gamma every step_size epochs.
+            lr_scheduler = torch.optim.lr_scheduler.StepLR(
+                optimizer=optimizer, step_size=epochs // 4, gamma=lr_scheduler_gamma)
+
+        """
+        - to parallelize operations on the CPU
+        - If you are using a distributed training framework, such as PyTorch DistributedDataParallel, 
+            then you should set the number of threads to be equal to the number of workers in the distributed training job
+        """
+        if distributed_lr:
+            torch.set_num_threads(2)
+        mp_rank = 0
+
+        # making a log folder labeled with time of trial
+        log_folder_path = results_path
+        if distributed_lr is False or mp_rank == 0:
+            log_folder_path = make_log_folder(results_path, trial_name)
+
+        ###########
+        # Export
+        ###########
+        if mode == 'export' and mp_rank == 0:
+            dummy_input = torch.rand(
+                (batch_size, in_channels, input_size, input_size))
+            checkpoint = torch.load(weights_path,map_location=torch.device('cpu'))
+            model.load_state_dict(checkpoint['model_state_dict'])
+            model.eval()
+            model.to("cpu")
+            onnx_export(model, dummy_input, results_path)
+
+        if mp_rank == 0:
+            # saving hyperparameters file so that it can be used later to reproduce the trial
+            shutil.copyfile(path, os.path.join(
+                log_folder_path, "model_config.yaml"))
+
+        ###########
+        # Train
+        ###########
+        if mode == "train" or mode == "overfit":
+            train_loader, valid_loader = get_data_loaders(
+                dataset_path, batch_size, train_ratio=train_validate_ratio, test_validate_ratio=test_validate_ratio, mode=mode, augment=augment, input_size=input_size,
+                random_state=random_seed, distributed_lr=distributed_lr)
+
+            train_loss, validation_loss = train(model=model, train_loader=train_loader, test_loader=valid_loader,
+                                                optimizer=optimizer, criterion=criterion, out_channels=out_channels, save_weight_path=weights_path,
+                                                log_folder_path=log_folder_path, trial_name=trial_name, used_device=device, distributed_lr=distributed_lr,
+                                                lr_scheduler=lr_scheduler,
+                                                epochs=epochs, auto_cast=auto_cast, clip_grad=clip_grad, log_period=log_period, mlflow=mlflow)
+
+        if distributed_lr:
+            import torch.distributed as dist
+            # destroying and de-initializing distributed package
+            dist.destroy_process_group()
+
+        ###########
+        # Test
+        ###########
+        if mode == 'test':
+            checkpoint = torch.load(weights_path,map_location=torch.device('cpu'))
+            model.load_state_dict(checkpoint['model_state_dict'])
+            model.eval()
+            model.to("cpu")
+            test_loader = get_data_loaders(dataset_path, batch_size=1, train_ratio=train_validate_ratio, test_validate_ratio=test_validate_ratio,
+                                           mode=mode, input_size=input_size, random_state=random_seed, distributed_lr=distributed_lr)
+            test(model=model, test_loader=test_loader,
+                 criterion=criterion, visualization_path=log_folder_path, mlflow=mlflow)
 
 
-
-    ###########
-    # Train
-    ###########
-    callbacks_n=[]
-    if pruning:
-        print("include pruning")
-        pruning = ModelPruning("l1_unstructured", amount=0.5)
-        callbacks_n.append(pruning)
-    if early_stopping:
-        early_stopping = EarlyStopping(monitor="", mode="min", min_delta=0.001, patience=5)
-        callbacks_n.append(early_stopping)
-        
-        
-    if mode == "train" or mode =="overfit":
-        
-        
-        ddp = DDPStrategy(process_group_backend="gloo")
-
-        data = MIPDataModule(dataset_path, batch_size=batch_size,
-                            input_size=input_size, train_validate_ratio=train_validate_ratio,
-                            test_validate_ratio=test_validate_ratio,mode=mode)
-
-        trainer = pl.Trainer(max_epochs=epochs,
-                            enable_progress_bar=True,
-                            num_sanity_val_steps=0,
-                            accelerator="gpu",
-                            logger=mlflow_logger,
-                            log_every_n_steps=log_period,
-                            limit_train_batches=6 if mode == 'overfit' else None,
-                            limit_val_batches=6 if mode == 'overfit' else None,
-                            callbacks=callbacks_n if len(callbacks_n)>0 else None,
-                            devices=[0, 1] if distributed_lr else "auto",
-                            strategy=ddp if distributed_lr else "auto",
-                            default_root_dir=log_folder_path)
-
-        print("preparing fitting")
-        trainer.fit(model, data)
-
-    ###########
-    # Export
-    ###########
-    if mode == 'export' :
-        dummy_input = torch.rand(
-            (batch_size, in_channels, input_size, input_size))
-        checkpoint = torch.load(weights_path, map_location=torch.device('cpu'))
-        model=model.model
-        model.load_state_dict(checkpoint['model_state_dict'])
-        model.eval()
-        model.float()
-        model.to("cpu")
-        onnx_path=os.path.join(results_path + "\\model.onnx")
-        onnx_export(model, dummy_input, onnx_path)
+        if mode=="sparse_ml":
+            
+            train_loader, valid_loader = get_data_loaders(
+                dataset_path, batch_size, train_ratio=train_validate_ratio, test_validate_ratio=test_validate_ratio, mode=mode, augment=augment, input_size=input_size,
+                random_state=random_seed, distributed_lr=distributed_lr)
 
 
-    if mode=="post_quantize":
-        import onnx
-        onnx_path=os.path.join(results_path + "\\nerve_model.onnx")
-        input_shape=(1, 1, 96, 96, 96)
-        post_quantize(onnx_path,quantization_mode="static",input_shape=input_shape)
+            manager = ScheduledModifierManager.from_yaml('D:/Code_store/x-ray_segmentation/src/sparse_recipe.yaml')
+            optimizer = manager.modify(model, optimizer, steps_per_epoch=len(train_loader))
+            # run transfer learning
+            train_loss, validation_loss = train(model=model, train_loader=train_loader, test_loader=valid_loader,
+                                                optimizer=optimizer, criterion=criterion, out_channels=out_channels, save_weight_path=weights_path,
+                                                log_folder_path=log_folder_path, trial_name=trial_name, used_device=device, distributed_lr=distributed_lr,
+                                                lr_scheduler=lr_scheduler,
+                                                epochs=manager.max_epochs, auto_cast=auto_cast, clip_grad=clip_grad, log_period=log_period, mlflow=mlflow)
 
 
+            manager.finalize(model)
 
-    ###########
-    # Test
-    ###########
-
-    if mode == 'test':
-        checkpoint = torch.load(weights_path, map_location=torch.device('cpu'))
-        model.load_state_dict(checkpoint['model_state_dict'])
-        trainer.test(model, data)
-
-    if mode=="test_onnx":
-        import torch.nn as nn
-        sub_dataset = MIPDataModule(dataset_path, batch_size=1,
-        input_size=input_size, train_validate_ratio=train_validate_ratio,
-        test_validate_ratio=test_validate_ratio,mode="overfit")
-        
-        sub_dataset.prepare_data()
-        sub_dataset.setup("validate")
-        validate_dataloader=sub_dataset.val_dataloader()
-
-        model=model.model
-        
-        checkpoint = torch.load(weights_path, map_location=torch.device('cpu'))
-        model.load_state_dict(checkpoint['model_state_dict'])
-        #trainer.test(model, data)
-        criterion = nn.CrossEntropyLoss()
-        detailed_evaluation(model,validate_dataloader,criterion,log_folder_path,onnx_compare=True,onnx_path="results/model_quantized.onnx",used_device="cpu")
-
-        
-        
-        
-    # saving hyperparameters file so that it can be used later to reproduce the trial
-    shutil.copyfile(path, os.path.join(
-        log_folder_path, "model_config.yaml"))
-    
 if __name__ == "__main__":
     main()
+    #del os.environ["MLFLOW_ENABLE_SYSTEM_METRICS_LOGGING"]
