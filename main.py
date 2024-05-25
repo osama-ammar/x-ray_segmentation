@@ -1,4 +1,4 @@
-from networks import U_Net, SMP, onnx_export, load_ckp
+from networks import U_Net, SMP, onnx_export, load_ckp ,U_Net_distilled
 from loader import get_data_loaders, make_log_folder
 from test import test
 import subprocess
@@ -7,6 +7,8 @@ import torch.nn as nn
 import torch.optim as optim
 import yaml
 from train import *
+from train_distillation import *
+
 import shutil
 import os
 import warnings
@@ -94,11 +96,14 @@ def main():
 
         models = {
             "U_Net": U_Net(in_channels, out_channels, fmaps, dropout),
+            "U_Net_distilled": U_Net_distilled(in_channels, out_channels, 10, dropout),
+            
             "SMP": SMP(in_channels, out_channels)
         }
         # model initializing
         # rank of the running process in multiple-processing setting or 0 for single-processing
         model = models[config.get("model")].to(device)
+        light_model =  models["U_Net_distilled"].to(device)
 
         if distributed_lr:
             """
@@ -228,6 +233,23 @@ def main():
             test(model=model, test_loader=test_loader,
                  criterion=criterion, visualization_path=log_folder_path, mlflow=mlflow)
 
+        ###########
+        # Distillation
+        ###########
+        if mode == 'distil':
+            checkpoint = torch.load(weights_path)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            
+            train_loader, valid_loader = get_data_loaders(
+                dataset_path, batch_size, train_ratio=train_validate_ratio, test_validate_ratio=test_validate_ratio, mode="overfit", augment=augment, input_size=input_size,
+                random_state=random_seed, distributed_lr=distributed_lr)
+
+            train_loss, validation_loss = train_distillation(teacher_model=model,student_model=light_model, train_loader=train_loader, test_loader=valid_loader,
+                                                optimizer=optimizer, criterion=criterion, out_channels=out_channels, save_weight_path=weights_path,
+                                                log_folder_path=log_folder_path, trial_name=trial_name, used_device=device, distributed_lr=distributed_lr,
+                                                lr_scheduler=lr_scheduler,
+                                                epochs=epochs, auto_cast=auto_cast, clip_grad=clip_grad, log_period=log_period, mlflow=mlflow,temperature=2, soft_target_loss_weight=0.25, ce_loss_weight=0.75)            
+            
 
 if __name__ == "__main__":
     main()

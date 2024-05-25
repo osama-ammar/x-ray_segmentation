@@ -1,12 +1,12 @@
-mode: overfit # train , test ,export ,overfit
+mode: distil # train , test ,export ,overfit , distil
 distributed_lr: False #torchrun --standalone --nnodes=1 --nproc-per-node=2  "C:\Users\Ossama Ammar\Atomica-code\cvml\dicom-teeth-segmentation\main.py"
 random_seed: 42
 trial_name: roi_segmentation_overift
 mlflow_trial_name: roi_segmentation_overift
 
 #model and data:
-model: U_Net #available models : U_Net ,SMP
-batch_size: 1
+model: U_Net #available models : U_Net ,SMP ,U_Net_distilled
+batch_size: 2
 in_channels: 1
 out_channels: 2
 fmaps: 16 #in case of using U_Net
@@ -17,9 +17,9 @@ test_validate_ratio: 0.5
 dataset_version: False #v1.0 #False #roi-dataset-1.0
 
 #hyperparameters:
-epochs: 50
+epochs: 200
 log_period: 1
-learning_rate: 0.0001
+learning_rate: 0.0002
 criterion: CrossEntropyLoss
 optimizer: Adam
 augment: False
@@ -34,5 +34,5 @@ lr_scheduler_gamma: 0.1
 #paths :
 dataset_path: D:\cases_dicom\chest_x-ray\dataset
 test_dataset_path: D:\cases_dicom\chest_x-ray\test_set
-weights_path: D:\Code_store\x-ray_segmentation\results\unet.pth
+weights_path: D:\Code_store\x-ray_segmentation\results\unet_teacher.pth
 results_path: D:\Code_store\x-ray_segmentation\results
