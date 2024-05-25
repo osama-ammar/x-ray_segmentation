@@ -1,4 +1,4 @@
-mode: overfit # train , test ,export ,overfit
+mode: train # train , test ,export ,overfit
 distributed_lr: False #torchrun --standalone --nnodes=1 --nproc-per-node=2  "C:\Users\Ossama Ammar\Atomica-code\cvml\dicom-teeth-segmentation\main.py"
 random_seed: 42
 trial_name: roi_segmentation_overift
@@ -12,7 +12,7 @@ out_channels: 2
 fmaps: 16 #in case of using U_Net
 dropout: 0.4
 input_size: 512
-train_validate_ratio: 0.5
+train_validate_ratio: 0.8
 test_validate_ratio: 0.5
 dataset_version: False #v1.0 #False #roi-dataset-1.0
 

@@ -80,6 +80,11 @@ def train_epoch(
             case_name = item["case_name"]
 
             #print(item["img"].unsqueeze(1).to(used_device))
+            #print(f"train input : {data.shape} , {case_name}")
+            if len(data.shape) >4 :
+                print(f"strange input : {data.shape} , {case_name}")
+                #output_tensor = np.mean(data, axis=-1, keepdims=False)
+                continue
             # Forward pass.
             outputs: Tensor = model(data)
 
@@ -159,6 +164,10 @@ def validate_epoch(
             mask = item["mask"].to('cuda').long()
             case_name = item["case_name"]
 
+            if len(data.shape) >4 :
+                print(f"strange input : {data.shape} , {case_name}")
+                continue
+            
             # Forward pass.
             outputs: Tensor = model(data)
 
