@@ -15,6 +15,28 @@
 - We used accuracy, precision, iou as metrics.
 - loss function : cross entropy
 
+--------------------------------------------------------
+
+## MLFlow stuff
+
+### Tracking metrics
+
+![screenshot](metrics.png)
+
+### System metrics during training
+
+![screenshot](system.png)
+
+### Visualization during training
+
+![screenshot](visualization.png)
+
+### experiments comparison
+
+![screenshot](comparison.png)
+
+--------------------------------------------------------
+
 ## Usage
 
 1. Navigate to the project directory.
@@ -64,27 +86,6 @@ To export the trained model, set the `mode` argument to `export`. The model will
 
 The results, including trained models and logs, will be saved in the specified `model_path` and `result_path` directories, respectively. Each run of the program will create a subdirectory in the `result_path` directory named with the model type and the current date and time.
 
---------------------------------------------------------
-
-## MLFlow stuff
-
-### Tracking metrics
-
-![screenshot](metrics.png)
-
-### System metrics during training
-
-![screenshot](system.png)
-
-### Visualization during training
-
-![screenshot](visualization.png)
-
-### experiments comparison
-
-![screenshot](comparison.png)
-
---------------------------------------------------------
 
 ## TODO
 
